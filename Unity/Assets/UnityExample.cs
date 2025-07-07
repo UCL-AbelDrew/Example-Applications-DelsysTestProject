@@ -205,8 +205,6 @@ public class UnityExample : MonoBehaviour
         await RFPipeline.TrignoRfManager.AddTrignoComponent(new System.Threading.CancellationToken());
     }
 
-    #endregion
-
     public void SelectSensors()
     {
         text = "Selecting all sensors . . .";
