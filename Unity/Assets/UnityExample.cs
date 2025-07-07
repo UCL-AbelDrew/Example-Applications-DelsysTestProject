@@ -18,10 +18,13 @@ using UnityEngine.Events;
 
 public class UnityExample : MonoBehaviour
 {
-    //Paste key/license strings here
-    private string key = "";
-    private string license = "";
+    //License key and license file for the Delsys API should be stored in the streamingAssets folder.
+    // Populated in the Start function, you must send the filename to the filereader
+    string key = "";
+    string license = "";
 
+    // SensorGraphManager used to display the graphs for each sensor.
+    public SensorGraphManager sensorGraphManager;
 
     /// <summary>
     /// Data structure for recording every channel of data.
@@ -48,6 +51,11 @@ public class UnityExample : MonoBehaviour
     // Use this for initialization
     void Start()
     {
+        // License files are stored in the StreamingAssets folder.
+        FileReader fileReader = new();
+        key = fileReader.ReadFile("/PublicKey.lic");
+        license = fileReader.ReadFile("/UCL.lic");
+     
 
         Debug.Log("Entered Start Function.");
 
@@ -87,7 +95,20 @@ public class UnityExample : MonoBehaviour
         StartButton.enabled = start;
         StopButton.enabled = stop;
         PairButton.enabled = pair;
-        PipelineState.text = PipelineController.Instance.PipelineIds[0].CurrentState.ToString();
+        try {PipelineState.text = PipelineController.Instance.PipelineIds[0].CurrentState.ToString();
+        }
+        catch (Exception e)
+        {
+          //  Debug.LogError("Error retrieving pipeline state: " + e.Message);
+          // If the pipeline is not initialized, set the text to "No Pipeline"
+            if (PipelineController.Instance.PipelineIds.Count == 0)
+                PipelineState.text = "No Pipeline";
+            else
+                PipelineState.text = "Error retrieving state";
+        }
+        {
+            PipelineState.text = "No Pipeline";
+        }
     }
 
     public void CopyUSBDriver()
@@ -163,12 +184,21 @@ public class UnityExample : MonoBehaviour
     public virtual async void clk_Scan()
     {
         Console.WriteLine("Scan Clicked");
+
+        if (RFPipeline == null || RFPipeline.TrignoRfManager == null || RFPipeline.TrignoRfManager.Components == null)
+        {
+            Debug.Log("Scan Failed: Pipeline or its components are not initialized. Possible Cause: ");
+            return;
+        }
+
         foreach(var comp in RFPipeline.TrignoRfManager.Components)
         {
             await RFPipeline.TrignoRfManager.DeselectComponentAsync(comp);
         }
         text = "Scanning . . .";
         await RFPipeline.Scan();
+
+        text = "Scan complete. Found " + RFPipeline.TrignoRfManager.Components.Count + " sensors.";
     }
 
     public virtual void clk_Select()
@@ -204,22 +234,30 @@ public class UnityExample : MonoBehaviour
         text = "Awaiting a sensor pair . . .";
         await RFPipeline.TrignoRfManager.AddTrignoComponent(new System.Threading.CancellationToken());
     }
-
+    #endregion
     public void SelectSensors()
     {
         text = "Selecting all sensors . . .";
 
-        // Select every component we found and didn't filter out.
-        foreach (var component in RFPipeline.TrignoRfManager.Components)
+        var components = RFPipeline.TrignoRfManager.Components.ToList();
+
+        foreach (var component in components)
         {
             bool success = RFPipeline.TrignoRfManager.SelectComponentAsync(component).Result;
-            if(success){
+            if (success)
+            {
                 text = component.FriendlyName + " selected!";
             }
-            else{
+            else
+            {
                 text = "Could not select sensor!!";
             }
-        }       
+        }
+
+        // Pass the components to the graph manager
+        if (sensorGraphManager != null)
+            sensorGraphManager.CreateGraphsForSensors(components);
+
         start = true;
     }
 
@@ -287,6 +325,7 @@ public class UnityExample : MonoBehaviour
         //Channel based list of data for this frame interval
         List<List<double>> data = new List<List<double>>();
 
+        // Loops through each component in the frame data
         for (int k = 0; k < e.Data.Count(); k++)
         {
             // Loops through each connected sensor
@@ -301,10 +340,16 @@ public class UnityExample : MonoBehaviour
 
         }
 
-        //Add frame data to entire collection data buffer
+
+        //Add frame data to entire collection data buffer, use this to record all data for the session.
         AllCollectionData.Add(data);
 
-        text = AllCollectionData.Count.ToString();
+
+        // Update the graphs with the current frame data
+        sensorGraphManager.UpdateGraphsWithFrameData(data);
+
+
+        text = "Packets Received: " + AllCollectionData.Count.ToString();
     }
 
     public virtual void CollectionStarted(object sender, DelsysAPI.Events.CollectionStartedEvent e)
